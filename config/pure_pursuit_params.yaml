@@ -1,0 +1,12 @@
+/**:
+  pure_pursuit_planner:
+    ros__parameters:
+      lookahead_distance: 0.5      # ルックアヘッド距離（基本値）
+      min_lookahead_distance: 0.3  # 最小ルックアヘッド距離
+      max_lookahead_distance: 1.5  # 最大ルックアヘッド距離
+      lookahead_ratio: 2.0         # 速度に対するルックアヘッド距離の比
+      linear_velocity: 0.2         # 線形速度（m/s）
+      max_angular_velocity: 1.0    # 最大角速度（rad/s）
+      goal_tolerance: 0.2          # ゴール許容誤差（m）
+      robot_frame_id: "base_link"  # ロボットのフレームID
+      map_frame_id: "map"          # マップのフレームID

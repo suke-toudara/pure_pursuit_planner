@@ -5,52 +5,33 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
+# find dependencies
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
 
-# Include directories
-include_directories(
-  include
+
+ament_auto_add_library(pure_pursuit_planner SHARED
+  src/pure_pursuit_planner_component.cpp
 )
 
-# Pure Pursuit Planner Node
-add_executable(pure_pursuit_planner_node
-  src/pure_pursuit_planner.cpp
+rclcpp_components_register_node(pure_pursuit_planner
+  PLUGIN "pure_pursuit_planner::PurePursuitNode"
+  EXECUTABLE pure_pursuit_planner_component
 )
 
-ament_target_dependencies(pure_pursuit_planner_node
-  rclcpp
-  geometry_msgs
-  nav_msgs
-  std_msgs
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
+
+ament_auto_add_executable(pure_pursuit_planner_node
+  src/pure_pursuit_planner_node.cpp 
 )
 
-# Install targets
-install(TARGETS
-  pure_pursuit_planner_node
-  DESTINATION lib/${PROJECT_NAME}
+target_link_libraries(pure_pursuit_planner_node
+  pure_pursuit_planner
 )
 
-# Install launch files
-install(DIRECTORY
-  launch
-  DESTINATION share/${PROJECT_NAME}/
-)
 
-# Install header files
-install(DIRECTORY
-  include/
-  DESTINATION include/
+install(
+  DIRECTORY "include/"
+  DESTINATION include
 )
 
 if(BUILD_TESTING)
@@ -58,4 +39,15 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_package()
+
+
+install(DIRECTORY
+  launch
+  config
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+
+install(FILES DESTINATION share/${PROJECT_NAME})
+
+ament_auto_package()
