@@ -56,30 +56,44 @@ pure_pursuit_planner/
 
 | Variable Name      | Type            | Description                         |
 |-------------------------|-------------------|---------------------------------------|
-| `odom`                  | `nav_msgs::msg::Odometry` | Odometry information of the robot |
-| `tgt_path`              | `nav_msgs::msg::Path` | Target trajectory of the robot |
+| `path`                  | `nav_msgs::msg::Path` | Target trajectory for the robot to follow |
+| Transform (TF2)         | `geometry_msgs::msg::TransformStamped` | Robot pose via TF2 (map → base_link) |
 
 ### Output
 
 | Variable Name      | Type            | Description                         |
 |-------------------------|-------------------|---------------------------------------|
-| `cmd_vel`               | `geometry_msgs::msg::Twist` | Velocity and angular velocity commands for the robot |
+| `/auto_cmd_vel`         | `geometry_msgs::msg::Twist` | Velocity commands for the robot |
+| `~/marker`              | `visualization_msgs::msg::MarkerArray` | Visualization markers for target point |
+| `~/mode`                | `std_msgs::msg::String` | Current robot state (STOP/START_ROTATE/FOLLOW/GOAL_ROTATE/GOAL) |
+
+### Parameters
+
+| Parameter Name         | Type     | Default | Description                         |
+|------------------------|----------|---------|-------------------------------------|
+| `lookahead_distance`   | `double` | 0.5     | Base lookahead distance (m) |
+| `min_lookahead_distance` | `double` | 0.3   | Minimum lookahead distance (m) |
+| `max_lookahead_distance` | `double` | 1.5   | Maximum lookahead distance (m) |
+| `linear_velocity`      | `double` | 0.2     | Target linear velocity (m/s) |
+| `max_angular_velocity` | `double` | 1.0     | Maximum angular velocity (rad/s) |
+| `goal_tolerance`       | `double` | 0.2     | Goal position tolerance (m) |
+| `rotation_threshold`   | `double` | 0.1     | Rotation angle threshold (rad) |
+| `rotation_velocity`    | `double` | 0.5     | Angular velocity for in-place rotation (rad/s) |
+| `max_velocity`         | `double` | 1.0     | Maximum velocity limit (m/s) |
+| `robot_frame_id`       | `string` | "base_link" | Robot frame ID for TF2 |
+| `map_frame_id`         | `string` | "map"   | Map frame ID for TF2 |
 
 ### Internal Values
 
 | Variable Name      | Type            | Description                         |
 |-------------------------|-------------------|---------------------------------------|
-| `x`, `y`, `yaw`         | `double`          | Current position and orientation of the robot |
-| `v`, `w`                | `double`          | Velocity and angular velocity of the robot |
-| `cx`, `cy`,`cyaw`, `ck` | `std::vector<double>` | List of x and y coordinates of the path |
-| `target_ind`            | `int`             | Current target index |
-| `target_vel`            | `double`          | Target velocity |
-| `goal_threshold`        | `double`          | Threshold for goal judgment |
-| `k`, `Lfc`, `Kp`, `dt`  | `double`          | Pure Pursuit parameters |
-| `oldNearestPointIndex`  | `int`             | Index of the nearest point in the previous iteration |
-| `current_vel`           | `double`          | Current velocity of the robot |
-| `minCurvature`,`maxCurvature`         | `double`          | Minimum and maximum curvature values |
-| `minVelocity`,`maxVelocity`           | `double`          | Minimum and maximum velocity values |
+| `current_pose_`         | `geometry_msgs::msg::Pose` | Current robot pose from TF2 |
+| `target_point_`         | `geometry_msgs::msg::Point` | Current target point on path |
+| `current_state_`        | `RobotState` | Current state (STOP/START_ROTATE/FOLLOW/GOAL_ROTATE/GOAL) |
+| `closest_idx_`          | `size_t` | Index of closest point on path |
+| `target_idx_`           | `double` | Index of current target point |
+| `follow_path_`          | `bool` | Flag indicating if path following is active |
+| `is_goal_reached_`      | `bool` | Flag indicating if goal has been reached |
 
 ## Software architecture
 
@@ -88,38 +102,55 @@ pure_pursuit_planner/
 ```mermaid
 classDiagram
     class PurePursuitNode {
-        +PurePursuitNode()
-        -void updateControl()
-        -std::pair<double, double> purePursuitControl(int&)
-        -std::pair<int, double> searchTargetIndex()
-        -double calcDistance(double, double) const
-        -void odometry_callback(nav_msgs::msg::Odometry::SharedPtr)
-        -void path_callback(nav_msgs::msg::Path::SharedPtr)
-        -void publishCmd(double, double)
-        -rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub
-        -rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub
-        -rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub
-        -rclcpp::TimerBase::SharedPtr timer
-        -std::vector<double> cx
-        -std::vector<double> cy
-        -std::vector<double> cyaw
-        -std::vector<double> ck
-        -double x, y, yaw, v, w
-        -int target_ind
-        -int oldNearestPointIndex
-        -double target_vel
-        -double current_vel
-        -bool path_subscribe_flag
-        -double goal_threshold
-        -const double k
-        -const double Lfc
-        -const double Kp
-        -const double dt
-        -double minCurvature
-        -double maxCurvature
-        -double minVelocity
-        -double maxVelocity
+        +PurePursuitNode(NodeOptions)
+        +~PurePursuitNode()
+        -void onPathReceived(Path::SharedPtr)
+        -void ControlLoop()
+        -bool findTargetPoint()
+        -void detect_velocity()
+        -void updateState()
+        -void getCurrentPose()
+        -double calculateAngularVelocity(Pose)
+        -double calc_dinstanse(size_t)
+        -bool isStartAngleReached()
+        -bool isGoalReached(Pose, PoseStamped)
+        -bool isGoalAngleReached()
+        -double calculateDistance(Point, Point)
+        -bool colisionCheck()
+        -void publishMarkers(Point)
+        -string getCurrentMode()
+        -enum RobotState
+        -Publisher twist_publisher_
+        -Publisher marker_publisher_
+        -Publisher mode_publisher_
+        -Subscription path_subscriber_
+        -TimerBase control_timer_
+        -tf2_ros::Buffer tf_buffer_
+        -tf2_ros::TransformListener tf_listener_
+        -Path::SharedPtr current_path_
+        -Pose current_pose_
+        -Point target_point_
+        -RobotState current_state_
+        -double lookahead_distance_
+        -double linear_velocity_
+        -double max_angular_velocity_
+        -double goal_tolerance_
+        -size_t closest_idx_
+        -double target_idx_
+        -bool follow_path_
+        -bool is_goal_reached_
     }
+
+    class RobotState {
+        <<enumeration>>
+        STOP
+        START_ROTATE
+        FOLLOW
+        GOAL_ROTATE
+        GOAL
+    }
+
+    PurePursuitNode --> RobotState
 ```
 
 ### Flowchart
@@ -127,125 +158,95 @@ classDiagram
 ```mermaid
 flowchart TD
     A[Start] --> B[Initialize ROS 2 Node: pure_pursuit_planner]
-    B --> C[Create Publishers and Subscribers]
-    C --> D[Enter Timer Callback Loop]
-    D --> E[Update Control]
-    E --> F[Pure Pursuit Control]
-    F --> G[Publish Command Velocity]
-    G --> H[Check if Goal is Reached]
-    H -->|No| I[Continue Path Tracking]
-    H -->|Yes| J[Stop the Robot]
-    I --> D
-    J --> K[End]
+    B --> C[Create Publishers, Subscribers, and Timer]
+    C --> D[Wait for Path Message]
+    D --> E[Path Received: onPathReceived]
+    E --> F[Reset State to STOP]
+    F --> G[Enter Control Loop: 100Hz Timer]
 
-    subgraph PurePursuitNode
-        L[Constructor: Initialize Node, Topics, and Parameters]
-        M[odometry_callback: Update Robot State]
-        N[path_callback: Receive and Process Path]
-        O[updateControl: Timer Callback for Control Update]
-        P[purePursuitControl: Calculate Steering and Velocity]
-        Q[publishCmd: Publish Velocity Command to cmd_vel]
-    end
+    G --> H[Get Current Pose from TF2]
+    H --> I[Update State Machine]
 
-    L --> M
-    L --> N
-    M --> O
-    N -.-> O
-    O --> P
-    P --> Q
+    I --> J{Current State?}
 
+    J -->|STOP| K[Publish Zero Velocity]
+    J -->|START_ROTATE| L[Rotate to Path Start Orientation]
+    J -->|FOLLOW| M[Find Target Point on Path]
+    J -->|GOAL_ROTATE| N[Rotate to Goal Orientation]
+    J -->|GOAL| O[Publish Zero Velocity & Stop]
+
+    L --> P{Start Angle Reached?}
+    P -->|Yes| Q[Transition to FOLLOW]
+    P -->|No| L
+
+    M --> R[Detect Velocity with Pure Pursuit]
+    R --> S[Publish Velocity Command]
+    S --> T{Goal Position Reached?}
+    T -->|Yes| U[Transition to GOAL_ROTATE]
+    T -->|No| M
+
+    N --> V{Goal Angle Reached?}
+    V -->|Yes| W[Transition to GOAL]
+    V -->|No| N
+
+    K --> G
+    Q --> G
+    U --> G
+    W --> G
+    O --> X[Wait for Next Path]
+    X --> D
 ```
 
-## System architecture
+## System Architecture
 
 ```mermaid
-classDiagram
-    class PathPublisher {
-        +PathPublisher()
-        +void loadPathData(string&)
-        +void publishPath()
-        -rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_
-        -rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr visualize_path_pub_
-        -rclcpp::TimerBase::SharedPtr timer_
-        -nav_msgs::msg::Path path_
-        -nav_msgs::msg::Path visualize_path_
-    }
-    
-    class PurePursuitNode {
-        +PurePursuitNode()
-        -void updateControl()
-        -std::pair<double, double> purePursuitControl(int&)
-        -std::pair<int, double> searchTargetIndex()
-        -double calcDistance(double, double) const
-        -void odometry_callback(nav_msgs::msg::Odometry::SharedPtr)
-        -void path_callback(nav_msgs::msg::Path::SharedPtr)
-        -void publishCmd(double, double)
-        -rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub
-        -rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub
-        -rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub
-        -rclcpp::TimerBase::SharedPtr timer
-        -std::vector<double> cx
-        -std::vector<double> cy
-        -std::vector<double> cyaw
-        -std::vector<double> ck
-        -double x, y, yaw, v, w
-        -int target_ind
-        -int oldNearestPointIndex
-        -double target_vel
-        -double current_vel
-        -bool path_subscribe_flag
-        -double goal_threshold
-        -const double k
-        -const double Lfc
-        -const double Kp
-        -const double dt
-        -double minCurvature
-        -double maxCurvature
-        -double minVelocity
-        -double maxVelocity
-    }
+graph LR
+    subgraph "Navigation System"
+        PathPlanner[Path Planner Node]
+        PurePursuitNode[Pure Pursuit Planner]
+        Robot[Robot / Simulator]
+        TF2[TF2 Transform System]
+        Visualizer[RViz / Visualization]
+    end
 
-    PathPublisher --|> PurePursuitNode: path_
+    PathPlanner -->|nav_msgs/Path| PurePursuitNode
+    TF2 -->|Transform: map→base_link| PurePursuitNode
+    PurePursuitNode -->|geometry_msgs/Twist| Robot
+    PurePursuitNode -->|visualization_msgs/MarkerArray| Visualizer
+    PurePursuitNode -->|std_msgs/String: mode| Visualizer
+    Robot -->|Updates TF2| TF2
 
-    class OdometryPublisher {
-        -rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub
-        -rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub
-        -rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr localmap_pub
-        -rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr laser_range_pub
-        -rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscriber
-        -std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster
-        -std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_
-        -rclcpp::TimerBase::SharedPtr timer_
-        -nav_msgs::msg::Path path
-        -double x, y, th, vx, vth
-        -rclcpp::Time current_time, last_time
-        +OdometryPublisher()
-        -void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr)
-        -void timer_callback()
-        -void send_static_transform()
-    }
-
-    PurePursuitNode --|> OdometryPublisher: v, w
-    OdometryPublisher --|> PurePursuitNode: x, y, th
+    style PurePursuitNode fill:#b3d9ff
+    style PathPlanner fill:#d9f2d9
+    style Robot fill:#ffe6cc
+    style TF2 fill:#f2d9f2
 ```
 
 ## Functional Requirements
 
 | Feature                    | Requirement                                            | Reason                                                      | Specification                                                                                                                                                                | Implemented Functions                          |
 |----------------------------|--------------------------------------------------------|-------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
-| **Path Following Control** | The robot needs to efficiently move along the specified path. | To ensure the robot accurately progresses towards the target. | - Use the Pure Pursuit algorithm to calculate the angle to the target point from the robot's current position and determine the velocity and angular velocity based on that.<br>(Implemented in `purePursuitControl`)<br>- Search for the index of the target point on the path that is a certain distance (`Lf`) ahead of the robot. The distance dynamically changes according to the velocity.<br>(Implemented in `searchTargetIndex`) | `updateControl`, `purePursuitControl`, `searchTargetIndex` |
-| **Velocity Command Output** | The robot needs to output the computed velocity and angular velocity commands. | To ensure the robot progresses at the appropriate speed. | - Output the computed velocity (`v`) and angular velocity (`w`) as a `geometry_msgs::msg::Twist` message.<br>(Implemented in `publishCmd`)<br>- Stop by setting the velocity and angular velocity to zero if approaching the goal (`goal_threshold` or less).<br>(Implemented in `publishCmd`) | `publishCmd`                                   |
-| **Path Output**             | The robot needs to output the path to follow.             | To provide a reference path for navigation.                 | - Output each point of the path (`cx[i]`, `cy[i]`) as part of a `nav_msgs::msg::Path` message. Each point is stored as a `geometry_msgs::msg::PoseStamped` message.<br>(Implemented in `publishPath`) | `publishPath`                                  |
-| **Odometry Reception**      | The robot needs to receive odometry information.          | To update the current position and orientation of the robot. | - Extract the robot's current position (`x`, `y`) and orientation (`yaw`) from the received `nav_msgs::msg::Odometry` message and update the internal variables.<br>(Implemented in `odometry_callback`) | `odometry_callback`                           |
+| **State Machine Control** | The robot needs to manage different operational states during navigation. | To handle start rotation, path following, and goal rotation separately. | - Implement 5 states: STOP, START_ROTATE, FOLLOW, GOAL_ROTATE, GOAL<br>- Automatically transition between states based on conditions<br>(Implemented in `updateState`) | `updateState`, `getCurrentMode` |
+| **Path Following Control** | The robot needs to efficiently follow the specified path using Pure Pursuit. | To ensure smooth and accurate path tracking. | - Find closest point on path using projection-based algorithm<br>- Select target point at lookahead distance ahead<br>- Calculate angular velocity using Pure Pursuit formula: ω = 2v·sin(α)/Lf<br>(Implemented in `findTargetPoint`, `detect_velocity`) | `findTargetPoint`, `detect_velocity` |
+| **Smooth Goal Approach** | The robot needs to smoothly transition to goal orientation near the endpoint. | To prevent sudden turning motions near the goal. | - Gradually blend path tracking angle with goal orientation<br>- Use quadratic weight function based on distance (0-1.5m)<br>- Weight increases smoothly as robot approaches goal<br>(Implemented in `detect_velocity`) | `detect_velocity` |
+| **Pose Estimation via TF2** | The robot needs to obtain its current pose from TF2. | To maintain accurate localization without direct odometry subscription. | - Query TF2 for transform from map to base_link<br>- Extract position and orientation from transform<br>(Implemented in `getCurrentPose`) | `getCurrentPose` |
+| **Orientation Control** | The robot needs to rotate to path start and goal orientations. | To align properly before following path and after reaching goal. | - Calculate angular velocity based on angle difference<br>- Use threshold (0.1 rad) to determine when rotation is complete<br>(Implemented in `calculateAngularVelocity`, `isStartAngleReached`, `isGoalAngleReached`) | `calculateAngularVelocity`, `isStartAngleReached`, `isGoalAngleReached` |
+| **Visualization** | The system needs to publish markers for debugging and monitoring. | To visualize target point and current state in RViz. | - Publish sphere marker at target point<br>- Publish current state as string message<br>(Implemented in `publishMarkers`, `getCurrentMode`) | `publishMarkers`, `getCurrentMode` |
 
 ## Detailed Design
 
 | Method Name           | Purpose                                           | Process                                                                                                                                    |
 |-----------------------|---------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| `updateControl`       | To execute the control loop and update the velocity command and following path. | 1. Call the `purePursuitControl` method to calculate the velocity and angular velocity.<br>2. Call the `publishCmd` method to publish the velocity command.<br>3. Call the `publishPath` method to publish the following path. |
-| `purePursuitControl`  | To calculate the velocity and angular velocity based on the Pure Pursuit algorithm. | 1. Call the `searchTargetIndex` method to search for the index of the target point.<br>2. Calculate the angle to the target point.<br>3. Calculate the velocity and angular velocity based on the calculated angle and parameters. |
-| `publishPath`         | To publish the following path.                        | 1. Create a `nav_msgs::msg::Path` message.<br>2. Add each point of the path to the `Path` message.<br>3. Use `path_pub` to publish the `Path` message. |
-| `searchTargetIndex`   | To search for the index of the target point.         | 1. Search for the index of the target point that is a certain distance (`Lf`) ahead of the robot.<br>2. The distance dynamically changes according to the velocity. |
-| `calcDistance`        | To calculate the distance between a point and the robot's current position. | 1. Calculate the Euclidean distance between the robot's current position (`x`, `y`) and the specified point (`point_x`, `point_y`). |
-| `odometry_callback`   | Callback function for odometry information.          | 1. Extract the robot's current position (`x`, `y`) and orientation (`yaw`) from the received `nav_msgs::msg::Odometry` message and update the internal variables. |
-| `publishCmd`          | To publish the velocity command.                     | 1. Create a `geometry_msgs::msg::Twist` message and set the calculated velocity (`v`) and angular velocity (`w`).<br>2. Use `cmd_vel_pub` to publish the `Twist` message.<br>3. Stop by setting the velocity and angular velocity to zero if approaching the goal (`goal_threshold` or less). |
+| `ControlLoop`         | Main control loop executed at 100Hz               | 1. Get current pose from TF2 using `getCurrentPose()`<br>2. Check for collisions with `colisionCheck()`<br>3. Update state machine with `updateState()`<br>4. Execute state-specific control logic<br>5. Publish mode string |
+| `updateState`         | Update robot state based on current conditions    | 1. Check current state<br>2. Evaluate transition conditions (angle reached, goal reached, etc.)<br>3. Transition to next appropriate state |
+| `getCurrentPose`      | Get robot pose from TF2 transform                | 1. Query TF2 buffer for map→base_link transform<br>2. Extract position and orientation<br>3. Update `current_pose_` member variable |
+| `findTargetPoint`     | Find closest point and target point on path      | 1. Search for closest point on path using projection algorithm<br>2. Update `closest_idx_`<br>3. Find point at lookahead distance ahead<br>4. Set `target_point_` and `target_idx_` |
+| `detect_velocity`     | Calculate and publish velocity using Pure Pursuit | 1. Scale linear velocity based on lookahead distance<br>2. Calculate angle to target point<br>3. Apply smooth goal orientation blending near endpoint<br>4. Calculate angular velocity: ω = 2v·sin(α)/Lf<br>5. Clamp and publish Twist message |
+| `calculateAngularVelocity` | Calculate angular velocity for rotation states | 1. Calculate angle difference to target orientation<br>2. Normalize by π/2 to get factor<br>3. Scale to angular velocity with min/max limits<br>4. Return signed velocity |
+| `isStartAngleReached` | Check if aligned with path start orientation     | 1. Get start pose yaw from path<br>2. Calculate angle difference<br>3. Return true if difference < rotation_threshold |
+| `isGoalReached`       | Check if position goal is reached                | 1. Calculate distance to goal position<br>2. Return true if distance < goal_tolerance |
+| `isGoalAngleReached`  | Check if aligned with goal orientation           | 1. Get goal pose yaw from path<br>2. Calculate angle difference<br>3. Return true if difference < rotation_threshold |
+| `calc_dinstanse`      | Calculate distance from robot to path segment    | 1. Project robot position onto path segment<br>2. Clamp projection parameter to [0,1]<br>3. Calculate Euclidean distance to projected point |
+| `calculateDistance`   | Calculate Euclidean distance between two points  | 1. Compute dx and dy<br>2. Return √(dx² + dy²) |
+| `publishMarkers`      | Publish visualization markers for RViz           | 1. Create sphere marker at target point<br>2. Set marker properties (color, scale)<br>3. Publish MarkerArray message |
+| `onPathReceived`      | Callback for receiving new path                  | 1. Store path in `current_path_`<br>2. Set `follow_path_` to true<br>3. Reset `closest_idx_` to 0<br>4. Reset state to STOP |

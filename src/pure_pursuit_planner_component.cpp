@@ -161,9 +161,15 @@ double PurePursuitNode::calculateAngularVelocity(const geometry_msgs::msg::Pose 
 {
   double target_yaw = tf2::getYaw(target_point.orientation);
   double current_yaw = tf2::getYaw(current_pose_.orientation);
-  double angle_diff = angles::shortest_angular_distance(current_yaw,target_yaw);
-  double factor = std::abs(angle_diff) / M_PI_2; // 45度を基準に
-  return std::min(0.1,std::max(2.0,factor * max_angular_velocity_));
+  double angle_diff = angles::shortest_angular_distance(current_yaw, target_yaw);
+
+  // 角度差に応じた角速度の計算（最小0.1、最大max_angular_velocity_）
+  const double min_angular_vel = 0.1;
+  double factor = std::abs(angle_diff) / M_PI_2;  // 90度を基準に正規化
+  double angular_vel = factor * max_angular_velocity_;
+  angular_vel = std::clamp(angular_vel, min_angular_vel, max_angular_velocity_);
+
+  return (angle_diff > 0) ? angular_vel : -angular_vel;
 }
 
 double PurePursuitNode::calc_dinstanse(size_t target_idx)
@@ -192,12 +198,13 @@ double PurePursuitNode::calc_dinstanse(size_t target_idx)
 
 
 bool PurePursuitNode::findTargetPoint()
-{ 
+{
   // 現在位置に最も近いパス上のポイントを見つける
   double min_dist = std::numeric_limits<double>::max();
   for (size_t i = closest_idx_; i < current_path_->poses.size() - 1; ++i) {
     double dist = calc_dinstanse(i);
-    if (dist< min_dist) {
+    if (dist < min_dist) {
+      min_dist = dist;
       closest_idx_ = i;
     }
   }
@@ -227,18 +234,33 @@ void PurePursuitNode::detect_velocity()
   double dx = target_point_.x - current_pose_.position.x;
   double dy = target_point_.y - current_pose_.position.y;
   double target_yaw = std::atan2(dy, dx);
-  // double local_y = -dx * sin(yaw) + dy * cos(yaw);
-  // double curvature = 2.0 * local_y / (lookahead_distance_ * lookahead_distance_);
-  // double angular_velocity = curvature * linea=r_velocity_;
+
+  // ゴールまでの残り距離を計算
   double remain_dist = calculateDistance(current_pose_.position, current_path_->poses.back().pose.position);
+
+  // ゴール付近での滑らかな旋回遷移
+  // 1.5m以上: Pure Pursuitのみ（weight=0）
+  // 0.0m: ゴール姿勢のみ（weight=1）
+  // その間: 距離に応じて滑らかに遷移
+  const double transition_start_distance = 1.5;  // 遷移開始距離
+  double goal_weight = 0.0;
+
+  if (remain_dist < transition_start_distance) {
+    // 距離に応じて0から1まで滑らかに増加（二次関数で緩やかに）
+    double ratio = 1.0 - (remain_dist / transition_start_distance);
+    goal_weight = ratio * ratio;  // 二次関数で緩やかな遷移
+  }
+
   double diff_angle;
-  if (remain_dist < 0.5) {    
+  if (goal_weight > 0.0) {
     double goal_yaw = tf2::getYaw(current_path_->poses.back().pose.orientation);
-    diff_angle = angles::shortest_angular_distance(target_yaw, yaw) * 0.5 + 
-                        angles::shortest_angular_distance(goal_yaw, yaw) * 0.5;
-  }else{
+    double path_angle = angles::shortest_angular_distance(target_yaw, yaw);
+    double goal_angle = angles::shortest_angular_distance(goal_yaw, yaw);
+    diff_angle = path_angle * (1.0 - goal_weight) + goal_angle * goal_weight;
+  } else {
     diff_angle = angles::shortest_angular_distance(target_yaw, yaw);
   }
+
   double angular_velocity = 2 * cmd_vel.linear.x * sin(diff_angle) / lookahead_distance_;
   cmd_vel.angular.z = std::clamp(angular_velocity, -max_angular_velocity_, max_angular_velocity_);
   twist_publisher_->publish(cmd_vel);
@@ -292,9 +314,8 @@ bool PurePursuitNode::colisionCheck()
   int robot_x_idx = static_cast<int>((current_pose_.position.x - origin_x) / resolution);
   int robot_y_idx = static_cast<int>((current_pose_.position.y - origin_y) / resolution);
 
-  //並列化
-  #pragma omp parallel for
-  int radius_cells = static_cast<int>(1.0 / resolution); // 1.0mの範囲をチェック
+  // 1.0mの範囲をチェック
+  int radius_cells = static_cast<int>(1.0 / resolution);
   for (int dy = -radius_cells; dy <= radius_cells; ++dy) {
     for (int dx = -radius_cells; dx <= radius_cells; ++dx) {
       int x_idx = robot_x_idx + dx;
